@@ -40,21 +40,6 @@ using namespace util;
   x(stock_data) \
   x(warehouse)
 
-#define TPCC_TRANSACTION         \
-  do {                           \
-    __label__ abort_in_progress;
-
-#define ABORT                    \
-;                                \
-abort_in_progress:
-
-#define END                      \
-  } while(0)
-
-#define CHECK_ABORT(op)          \
-if (!(op))                       \
-  goto abort_in_progress
-
 static inline ALWAYS_INLINE size_t
 NumWarehouses()
 {
@@ -1312,26 +1297,22 @@ tpcc_worker::txn_new_order()
     }
     mlock.multilock();
   }
-  TPCC_TRANSACTION {
+  try {
     ssize_t ret = 0;
-    bool found;
     const customer::key k_c(warehouse_id, districtID, customerID);
-    CHECK_ABORT(tbl_customer(warehouse_id)->get(txn, EncodeK(obj_key0, k_c), obj_v, found));
-    ALWAYS_ASSERT(found);
+    ALWAYS_ASSERT(tbl_customer(warehouse_id)->get(txn, EncodeK(obj_key0, k_c), obj_v));
     customer::value v_c_temp;
     const customer::value *v_c = Decode(obj_v, v_c_temp);
     checker::SanityCheckCustomer(&k_c, v_c);
 
     const warehouse::key k_w(warehouse_id);
-    CHECK_ABORT(tbl_warehouse(warehouse_id)->get(txn, EncodeK(obj_key0, k_w), obj_v, found));
-    ALWAYS_ASSERT(found);
+    ALWAYS_ASSERT(tbl_warehouse(warehouse_id)->get(txn, EncodeK(obj_key0, k_w), obj_v));
     warehouse::value v_w_temp;
     const warehouse::value *v_w = Decode(obj_v, v_w_temp);
     checker::SanityCheckWarehouse(&k_w, v_w);
 
     const district::key k_d(warehouse_id, districtID);
-    CHECK_ABORT(tbl_district(warehouse_id)->get(txn, EncodeK(obj_key0, k_d), obj_v, found));
-    ALWAYS_ASSERT(found);
+    ALWAYS_ASSERT(tbl_district(warehouse_id)->get(txn, EncodeK(obj_key0, k_d), obj_v));
     district::value v_d_temp;
     const district::value *v_d = Decode(obj_v, v_d_temp);
     checker::SanityCheckDistrict(&k_d, v_d);
@@ -1342,13 +1323,13 @@ tpcc_worker::txn_new_order()
     const new_order::key k_no(warehouse_id, districtID, my_next_o_id);
     const new_order::value v_no;
     const size_t new_order_sz = Size(v_no);
-    CHECK_ABORT(tbl_new_order(warehouse_id)->insert(txn, EncodeK(str(), k_no), Encode(str(), v_no)));
+    tbl_new_order(warehouse_id)->insert(txn, EncodeK(str(), k_no), Encode(str(), v_no));
     ret += new_order_sz;
 
     if (!g_new_order_fast_id_gen) {
       district::value v_d_new(*v_d);
       v_d_new.d_next_o_id++;
-      CHECK_ABORT(tbl_district(warehouse_id)->put(txn, EncodeK(str(), k_d), Encode(str(), v_d_new)));
+      tbl_district(warehouse_id)->put(txn, EncodeK(str(), k_d), Encode(str(), v_d_new));
     }
 
     const oorder::key k_oo(warehouse_id, districtID, k_no.no_o_id);
@@ -1360,13 +1341,13 @@ tpcc_worker::txn_new_order()
     v_oo.o_entry_d = GetCurrentTimeMillis();
 
     const size_t oorder_sz = Size(v_oo);
-    CHECK_ABORT(tbl_oorder(warehouse_id)->insert(txn, EncodeK(str(), k_oo), Encode(str(), v_oo)));
+    tbl_oorder(warehouse_id)->insert(txn, EncodeK(str(), k_oo), Encode(str(), v_oo));
     ret += oorder_sz;
 
     const oorder_c_id_idx::key k_oo_idx(warehouse_id, districtID, customerID, k_no.no_o_id);
     const oorder_c_id_idx::value v_oo_idx(0);
 
-    CHECK_ABORT(tbl_oorder_c_id_idx(warehouse_id)->insert(txn, EncodeK(str(), k_oo_idx), Encode(str(), v_oo_idx)));
+    tbl_oorder_c_id_idx(warehouse_id)->insert(txn, EncodeK(str(), k_oo_idx), Encode(str(), v_oo_idx));
 
     for (uint ol_number = 1; ol_number <= numItems; ol_number++) {
       const uint ol_supply_w_id = supplierWarehouseIDs[ol_number - 1];
@@ -1374,15 +1355,13 @@ tpcc_worker::txn_new_order()
       const uint ol_quantity = orderQuantities[ol_number - 1];
 
       const item::key k_i(ol_i_id);
-      CHECK_ABORT(tbl_item(1)->get(txn, EncodeK(obj_key0, k_i), obj_v, found));
-      ALWAYS_ASSERT(found);
+      ALWAYS_ASSERT(tbl_item(1)->get(txn, EncodeK(obj_key0, k_i), obj_v));
       item::value v_i_temp;
       const item::value *v_i = Decode(obj_v, v_i_temp);
       checker::SanityCheckItem(&k_i, v_i);
 
       const stock::key k_s(ol_supply_w_id, ol_i_id);
-      CHECK_ABORT(tbl_stock(ol_supply_w_id)->get(txn, EncodeK(obj_key0, k_s), obj_v, found));
-      ALWAYS_ASSERT(found);
+      ALWAYS_ASSERT(tbl_stock(ol_supply_w_id)->get(txn, EncodeK(obj_key0, k_s), obj_v));
       stock::value v_s_temp;
       const stock::value *v_s = Decode(obj_v, v_s_temp);
       checker::SanityCheckStock(&k_s, v_s);
@@ -1395,7 +1374,7 @@ tpcc_worker::txn_new_order()
       v_s_new.s_ytd += ol_quantity;
       v_s_new.s_remote_cnt += (ol_supply_w_id == warehouse_id) ? 0 : 1;
 
-      CHECK_ABORT(tbl_stock(ol_supply_w_id)->put(txn, EncodeK(str(), k_s), Encode(str(), v_s_new)));
+      tbl_stock(ol_supply_w_id)->put(txn, EncodeK(str(), k_s), Encode(str(), v_s_new));
 
       const order_line::key k_ol(warehouse_id, districtID, k_no.no_o_id, ol_number);
       order_line::value v_ol;
@@ -1406,18 +1385,16 @@ tpcc_worker::txn_new_order()
       v_ol.ol_quantity = int8_t(ol_quantity);
 
       const size_t order_line_sz = Size(v_ol);
-      CHECK_ABORT(tbl_order_line(warehouse_id)->insert(txn, EncodeK(str(), k_ol), Encode(str(), v_ol)));
+      tbl_order_line(warehouse_id)->insert(txn, EncodeK(str(), k_ol), Encode(str(), v_ol));
       ret += order_line_sz;
     }
 
     measure_txn_counters(txn, "txn_new_order");
     if (likely(db->commit_txn(txn)))
       return txn_result(true, ret);
-    else
-      return txn_result(false, 0);
-  } ABORT {
+  } catch (abstract_db::abstract_abort_exception &ex) {
     db->abort_txn(txn);
-  } END;
+  }
   return txn_result(false, 0);
 }
 
@@ -1479,17 +1456,15 @@ tpcc_worker::txn_delivery()
   scoped_str_arena s_arena(arena);
   scoped_lock_guard<spinlock> slock(
       g_enable_partition_locks ? &LockForPartition(warehouse_id) : nullptr);
-  TPCC_TRANSACTION {
+  try {
     ssize_t ret = 0;
-    bool success, found;
     for (uint d = 1; d <= NumDistrictsPerWarehouse(); d++) {
       const new_order::key k_no_0(warehouse_id, d, last_no_o_ids[d - 1]);
       const new_order::key k_no_1(warehouse_id, d, numeric_limits<int32_t>::max());
       new_order_scan_callback new_order_c;
       {
         ANON_REGION("DeliverNewOrderScan:", &delivery_probe0_cg);
-        tbl_new_order(warehouse_id)->scan(txn, EncodeK(obj_key0, k_no_0), &EncodeK0(obj_key1, k_no_1), new_order_c, s_arena.get(), success);
-        CHECK_ABORT(success);
+        tbl_new_order(warehouse_id)->scan(txn, EncodeK(obj_key0, k_no_0), &EncodeK0(obj_key1, k_no_1), new_order_c, s_arena.get());
       }
 
       const new_order::key *k_no = new_order_c.get_key();
@@ -1497,9 +1472,8 @@ tpcc_worker::txn_delivery()
         continue;
       last_no_o_ids[d - 1] = k_no->no_o_id + 1; // XXX: update last seen
 
-      CHECK_ABORT(tbl_oorder(warehouse_id)->get(txn, EncodeK(obj_key0, k_oo), obj_v, found));
       const oorder::key k_oo(warehouse_id, d, k_no->no_o_id);
-      if (unlikely(!found)) {
+      if (unlikely(!tbl_oorder(warehouse_id)->get(txn, EncodeK(obj_key0, k_oo), obj_v))) {
         // even if we read the new order entry, there's no guarantee
         // we will read the oorder entry: in this case the txn will abort,
         // but we're simply bailing out early
@@ -1515,8 +1489,7 @@ tpcc_worker::txn_delivery()
       const order_line::key k_oo_1(warehouse_id, d, k_no->no_o_id, numeric_limits<int32_t>::max());
 
       // XXX(stephentu): mutable scans would help here
-      tbl_order_line(warehouse_id)->scan(txn, EncodeK(obj_key0, k_oo_0), &EncodeK0(obj_key1, k_oo_1), c, s_arena.get(), success);
-      CHECK_ABORT(success);
+      tbl_order_line(warehouse_id)->scan(txn, EncodeK(obj_key0, k_oo_0), &EncodeK0(obj_key1, k_oo_1), c, s_arena.get());
       float sum = 0.0;
       for (size_t i = 0; i < c.size(); i++) {
         order_line::value v_ol_temp;
@@ -1532,41 +1505,37 @@ tpcc_worker::txn_delivery()
         order_line::value v_ol_new(*v_ol);
         v_ol_new.ol_delivery_d = ts;
         INVARIANT(s_arena.get()->manages(c.values[i].first));
-        CHECK_ABORT(tbl_order_line(warehouse_id)->put(txn, *c.values[i].first, Encode(str(), v_ol_new)));
+        tbl_order_line(warehouse_id)->put(txn, *c.values[i].first, Encode(str(), v_ol_new));
       }
 
       // delete new order
-      tbl_new_order(warehouse_id)->remove(txn, EncodeK(str(), *k_no), success);
-      CHECK_ABORT(success);
+      tbl_new_order(warehouse_id)->remove(txn, EncodeK(str(), *k_no));
       ret -= 0 /*new_order_c.get_value_size()*/;
 
       // update oorder
       oorder::value v_oo_new(*v_oo);
       v_oo_new.o_carrier_id = o_carrier_id;
-      CHECK_ABORT(tbl_oorder(warehouse_id)->put(txn, EncodeK(str(), k_oo), Encode(str(), v_oo_new)));
+      tbl_oorder(warehouse_id)->put(txn, EncodeK(str(), k_oo), Encode(str(), v_oo_new));
 
       const uint c_id = v_oo->o_c_id;
       const float ol_total = sum;
 
       // update customer
       const customer::key k_c(warehouse_id, d, c_id);
-      CHECK_ABORT(tbl_customer(warehouse_id)->get(txn, EncodeK(obj_key0, k_c), obj_v, found));
-      ALWAYS_ASSERT(found);
+      ALWAYS_ASSERT(tbl_customer(warehouse_id)->get(txn, EncodeK(obj_key0, k_c), obj_v));
 
       customer::value v_c_temp;
       const customer::value *v_c = Decode(obj_v, v_c_temp);
       customer::value v_c_new(*v_c);
       v_c_new.c_balance += ol_total;
-      CHECK_ABORT(tbl_customer(warehouse_id)->put(txn, EncodeK(str(), k_c), Encode(str(), v_c_new)));
+      tbl_customer(warehouse_id)->put(txn, EncodeK(str(), k_c), Encode(str(), v_c_new));
     }
     measure_txn_counters(txn, "txn_delivery");
     if (likely(db->commit_txn(txn)))
       return txn_result(true, ret);
-    else
-      return txn_result(false, ret);
-  } ABORT {
+  } catch (abstract_db::abstract_abort_exception &ex) {
     db->abort_txn(txn);
-  } END;
+  }
   return txn_result(false, 0);
 }
 
